@@ -6,23 +6,25 @@
 #include <cmath>
 #include <queue>
 #include <functional>
+#include <algorithm>
 using namespace std;
 typedef double Coordinate[3];
 
 const double DELTA = 0.5;//初始化种子的加权参数
 const double CONVEXETA = 0.1;//凹面的Eta值
 const double INF = 999999;//无穷
-const double EPSILON = 0.04;//模糊分割的阈值
+const double EPSILON = 0.036;//模糊分割的阈值
 
 enum FaceState
 {
 	UNDISCOVERED, DISCOVERED, VISITIED
 };
 
-enum FaceClass
+enum FaceKind
 {
-	A, B, FUZZY
+	FUZZY, DETERMINED
 };
+
 
 /********************************类定义*************************************/
 
@@ -53,15 +55,15 @@ struct Face
 	vector<Neighbor> Neighbors;
 	double NormalVector[3];
 	FaceState State;
-	double Pa;//落在两个区域中的概率
-	double Pb;
-	FaceClass Kind;//面片的类型
+	vector<double> Pl;//落在不同个区域中的概率
+	FaceKind Kind;//面片的类型
+	pair<int, int> PossibleRep;//落在的聚类种子
 	int Parent;//父亲面片编号，用于最大流问题广度优先搜索
 	double CurMaxCap;//到达当前节点的最大流
 	Face()
 	{
 		State = UNDISCOVERED;
-		Kind = A;
+		Kind = DETERMINED;
 	}
 };
 
@@ -97,13 +99,15 @@ void outputObjFile(string NewFileName, const vector<Vertice>& Vertices, const ve
 //计算测地距离和角距离
 pair<double, double> calculateDist(vector<Vertice>& Vertices, vector<Face>& Faces);
 //计算任意两个面片间的距离
-Edge dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges);
+int dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges);
 //清除所有标记
 void clearState(vector<Face>& Faces);
+//得到所有需要的聚类中心
+void decideReps(vector<Face>& Faces, double**& ppEdges, vector<int>& Reps);
 //聚类
-void cluster(vector<Face>& Faces, int& Repa, int& Repb, double**& ppEdges);
+void cluster(vector<Face>& Faces, vector<int>& Reps, double**& ppEdges);
 //模糊划分
-void fuzzyDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& FuzzyFacesIdx);
+void Div(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Reps, double AverageAngleDist, double**& ppEdges);
 //精细划分，利用最大流进行划分
 void accurateDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& FuzzyFacesIdx, double AverageAngleDist, double**& ppEdges, int Repa, int Repb);
 //清除父亲面片编号
@@ -120,10 +124,7 @@ int main(int argc, char* argv[])
 	vector<Face> Faces;//所有面
 	double** ppEdges;//任意两点间距离的矩阵，精确分割时为流量
 	pair<double, double> AverageDist;//第一个是AverageGeod，第二个是AverageAngleDist
-	Edge LargestEdge;//最长的距离
-	vector<int> FuzzyFacesIdx;//模糊区域
-	int Repa;//聚类种子
-	int Repb;
+	vector<int> Reps;//聚类中心
 	//读取文件
 	if (!readObjFile(FileName, Vertices, Faces))
 		return 0;
@@ -136,16 +137,16 @@ int main(int argc, char* argv[])
 	}
 
 	AverageDist = calculateDist(Vertices, Faces);
-	LargestEdge = dijkstra(Vertices, Faces, ppEdges);
-	Repa = LargestEdge.Start;//得到初始聚类种子
-	Repb = LargestEdge.End;
-	cluster(Faces, Repa, Repb, ppEdges);//进行聚类迭代
+	dijkstra(Vertices, Faces, ppEdges);//得到初始聚类种子
 
-	fuzzyDiv(Vertices, Faces, FuzzyFacesIdx);
+	decideReps(Faces, ppEdges, Reps);
 
-	outputObjFile("Mid" + FileName, Vertices, Faces);
+	cluster(Faces, Reps, ppEdges);//进行聚类迭代
+	Div(Vertices, Faces, Reps, AverageDist.second, ppEdges);
 
-	accurateDiv(Vertices, Faces, FuzzyFacesIdx, AverageDist.second, ppEdges, Repa, Repb);
+	//outputObjFile("Mid" + FileName, Vertices, Faces);
+
+	//accurateDiv(Vertices, Faces, FuzzyFacesIdx, AverageDist.second, ppEdges, Repa, Repb);
 
 	outputObjFile("New" + FileName, Vertices, Faces);
 
@@ -461,7 +462,7 @@ pair<double, double> calculateDist(vector<Vertice>& Vertices, vector<Face>& Face
 	return pair<double, double>(AverageGeod, AverageAngleDist);
 }
 
-Edge dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges)
+int dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges)
 {
 	unsigned int FacesCnt = Faces.size();
 	Edge LargestEdge;//最长的边
@@ -497,7 +498,7 @@ Edge dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges)
 		}
 		clearState(Faces);
 	}
-	return LargestEdge;
+	return LargestEdge.Start;
 }
 
 void clearState(vector<Face>& Faces)
@@ -509,124 +510,301 @@ void clearState(vector<Face>& Faces)
 	}
 }
 
-void cluster(vector<Face>& Faces, int & Repa, int & Repb, double**& ppEdges)
+void decideReps(vector<Face>& Faces, double **& ppEdges, vector<int>& Reps)
 {
 	unsigned int FacesCnt = Faces.size();
-	int LastRepa = Repa;//上一次的聚类种子
-	int LastRepb = Repb;
-	cout << "聚类种子: " << Repa << ';' << Repb << endl;
+	double LastMinRepDist;//上一次聚类中心之间的最小距离
+	double MaxRepDistChange;//聚类中心之间最小距离变化的最大值
+	unsigned int RepsCnt = 0;//变化前聚类中心数量
+	unsigned int MaxChangeStayCnt;//变化最大值保持次数的长短
 
-	pair<int, double> SmallestRepa(Repa, 0);//新的聚类种子
-	pair<int, double> SmallestRepb(Repb, 0);
+
+	double MinDist = INF;//求解最初的聚类中心
+	int InitialRep;
+	for (unsigned int i = 0; i < FacesCnt; i++)
+	{
+		double DistSum = 0;
+		for (unsigned int j = 0; j < FacesCnt; j++)
+		{
+			DistSum += ppEdges[i][j];
+			if (DistSum > MinDist)
+				break;
+		}
+		if (DistSum < MinDist)//如果和小于当前的最小值，更新初始聚类中心
+		{
+			MinDist = DistSum;
+			InitialRep = i;
+		}
+	}
+	Reps.push_back(InitialRep);
+
+	while (true)
+	{
+		double MaxDist = 0;//最大的距离
+		int NewRep;//新的聚类中心
+		for (unsigned int i = 0; i < FacesCnt; i++)
+		{
+			double MinDist = INF;//到聚类中心的最小距离
+			for (unsigned int j = 0; j < Reps.size(); j++)
+			{
+				if (ppEdges[i][Reps[j]] < MinDist)
+					MinDist = ppEdges[i][Reps[j]];
+			}
+			if (MinDist > MaxDist)//如果当前面片到已有聚类中心的最小距离大于之前的最小距离，就用当前的面片代替之前的面片
+			{
+				MaxDist = MinDist;
+				NewRep = i;
+			}
+		}
+
+		Reps.push_back(NewRep);
+
+		double CurRepsMinDist = INF;//当前不同聚类中心间的最小距离
+
+		for (unsigned int i = 0; i < Reps.size() - 1; i++)
+		{
+			if (ppEdges[Reps[i]][NewRep] < CurRepsMinDist)//如果当前两个聚类中心间的距离更小，就更新聚类中心之间的最小距离
+			{
+				CurRepsMinDist = ppEdges[Reps[i]][NewRep];
+			}
+		}
+
+		if (!RepsCnt)//如果之前只有一个聚类中心，就不计算差值
+		{
+			RepsCnt = 1;
+			LastMinRepDist = CurRepsMinDist;
+			MaxRepDistChange = 0;//变化量设为0
+			MaxChangeStayCnt = 0;//维持次数设为0
+		}
+		else
+		{
+			if (LastMinRepDist - CurRepsMinDist > MaxRepDistChange)//如果变化更快，就更新聚类中心最大变化斜率
+			{
+				MaxRepDistChange = LastMinRepDist - CurRepsMinDist;
+				RepsCnt = Reps.size() - 1;
+				MaxChangeStayCnt = 0;
+			}
+			else//如果变化更慢，最大变化保持
+			{
+				MaxChangeStayCnt++;
+			}
+			LastMinRepDist = CurRepsMinDist;
+		}
+
+		if (MaxChangeStayCnt >= 15)
+		{
+			while (Reps.size() > RepsCnt)
+			{
+				Reps.pop_back();//将后续聚类中心清除
+			}
+			return;
+		}
+	}
+}
+
+void cluster(vector<Face>& Faces, vector<int>& Reps, double**& ppEdges)
+{
+	unsigned int FacesCnt = Faces.size();
+	vector<int> LastReps = Reps;
+	vector<pair<int, double> > SmallestReps;//新聚类种子
+	cout << "聚类种子: ";
+	for (unsigned int i = 0; i < Reps.size(); i++)
+	{
+		cout << Reps[i] << ' ';
+		pair<int, double> Temp(Reps[i], 0);
+		SmallestReps.push_back(Temp);
+	}
+	cout << endl;
+	
+	
 	//初始化新聚类种子
 	for (unsigned int i = 0; i < FacesCnt; i++)
 	{
-		Faces[i].Pa = ppEdges[i][Repb] / (ppEdges[i][Repa] + ppEdges[i][Repb]);
-		Faces[i].Pb = ppEdges[i][Repa] / (ppEdges[i][Repa] + ppEdges[i][Repb]);
+		double SumDist = 0;;//到各个聚类中心距离倒数和
+		for (unsigned int j = 0; j < Reps.size(); j++)
+		{
+			if (ppEdges[i][Reps[j]] <= 1E-6)//避免出现除0的情况
+				continue;
+			SumDist += 1 / ppEdges[i][Reps[j]];
+		}
+		for (unsigned int j = 0; j < Reps.size(); j++)
+		{
+			if (ppEdges[i][Reps[j]] <= 1E-6)//避免出现除0的情况
+			{
+				Faces[i].Pl.push_back(1);
+				continue;
+			}
+			double Temp = (1 / ppEdges[i][Reps[j]]) / SumDist;
+			Faces[i].Pl.push_back(Temp);
+		}
 	}
 	for (unsigned int j = 0; j < FacesCnt; j++)
 	{
-		SmallestRepa.second += Faces[j].Pa * ppEdges[Repa][j];
-		SmallestRepb.second += Faces[j].Pb * ppEdges[Repb][j];
+		for (unsigned int k = 0; k < Reps.size(); k++)
+		{
+			SmallestReps[k].second += Faces[j].Pl[k] * ppEdges[Reps[k]][j];
+		}
 	}
 
 	int Cnt = 0;
 	do
 	{
 		Cnt++;
-		LastRepa = Repa;
-		LastRepb = Repb;
+		LastReps = Reps;
 
 		for (unsigned int i = 0; i < FacesCnt; i++)
 		{
-			double TempSumA = 0;//临时的加权和
-			double TempSumB = 0;
-			for (unsigned int j = 0; j < FacesCnt; j++)
+			for (unsigned int k = 0; k < Reps.size(); k++)
 			{
-				TempSumA += Faces[j].Pa * ppEdges[i][j];
-				if (TempSumA > SmallestRepa.second)
-					break;
-			}
-			//更新聚类种子
-			if (TempSumA < SmallestRepa.second)
-			{
-				SmallestRepa.first = i;
-				SmallestRepa.second = TempSumA;
-			}
-			for (unsigned int j = 0; j < FacesCnt; j++)
-			{
-				TempSumB += Faces[j].Pb * ppEdges[i][j];
-				if (TempSumB > SmallestRepb.second)
-					break;
-			}
-			if (TempSumB < SmallestRepb.second)
-			{
-				SmallestRepb.first = i;
-				SmallestRepb.second = TempSumB;
+				double TempSum = 0;//临时的加权和
+				for (unsigned int j = 0; j < FacesCnt; j++)
+				{
+					TempSum += Faces[j].Pl[k] * ppEdges[i][j];
+					if (TempSum > SmallestReps[k].second)
+						break;
+				}
+				//更新聚类种子
+				if (TempSum < SmallestReps[k].second)
+				{
+					SmallestReps[k].first = i;
+					SmallestReps[k].second = TempSum;
+				}
 			}
 		}
-		Repa = SmallestRepa.first;
-		Repb = SmallestRepb.first;
-		if (Repa == LastRepa && Repb == LastRepb)//如果聚类种子没变就直接跳出循环
+		for (unsigned int j = 0; j < Reps.size(); j++)
+			Reps[j] = SmallestReps[j].first;
+		if (Reps == LastReps)//如果聚类种子没变就直接跳出循环
 			break;
 
-		cout << "聚类种子: " << Repa << ';' << Repb << endl;
+		cout << "聚类种子: ";
+		for (unsigned int i = 0; i < Reps.size(); i++)
+		{
+			cout << Reps[i] << ' ';
+		}
+		cout << endl;
 		for (unsigned int i = 0; i < FacesCnt; i++)
 		{
-			Faces[i].Pa = ppEdges[i][Repb] / (ppEdges[i][Repa] + ppEdges[i][Repb]);
-			Faces[i].Pb = ppEdges[i][Repa] / (ppEdges[i][Repa] + ppEdges[i][Repb]);
+			double SumDist = 0;;//到各个聚类中心距离倒数和
+			for (unsigned int j = 0; j < Reps.size(); j++)
+			{
+				if (ppEdges[i][Reps[j]] <= 1E-6)//避免出现除0的情况
+					continue;
+				SumDist += 1 / ppEdges[i][Reps[j]];
+			}
+			for (unsigned int j = 0; j < Reps.size(); j++)
+			{
+				if (ppEdges[i][Reps[j]] <= 1E-6)//避免出现除0的情况
+				{
+					Faces[i].Pl[j] = 1;
+					continue;
+				}
+				double Temp = (1 / ppEdges[i][Reps[j]]) / SumDist;
+				Faces[i].Pl[j] = Temp;
+			}
 		}
-
 	} while (Cnt < 20);
 }
 
-void fuzzyDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& FuzzyFacesIdx)
+void Div(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Reps, double AverageAngleDist, double**& ppEdges)
 {
+	map<pair<int, int>, vector<int> > FuzzyIdx;
+	//模糊分割
 	unsigned int FacesCnt = Faces.size();
 	for (unsigned int i = 0; i < FacesCnt; i++)
 	{
-		if (Faces[i].Pa > 0.5 + EPSILON)
+		vector<double> TempPl = Faces[i].Pl;
+		sort(TempPl.rbegin(), TempPl.rend());
+		double MaxP = TempPl[0];//最大的两个概率
+		double MaxSecP = TempPl[1];
+		int R[2];
+		unsigned int k = 0;
+		for (unsigned int j = 0; j < Faces[i].Pl.size(); j++)//找到最大的两个概率对应的聚类中心
 		{
-			Faces[i].Kind = A;
-			for (unsigned int j = 0; j < 3; j++)
+			if ((Faces[i].Pl[j] <= MaxP + 1E-6 && Faces[i].Pl[j] >= MaxP - 1E-6)
+				|| (Faces[i].Pl[j] <= MaxSecP + 1E-6 && Faces[i].Pl[j] >= MaxSecP - 1E-6))
 			{
-				Vertices[Faces[i].V[j]].ColorData.R = 255;
-				Vertices[Faces[i].V[j]].ColorData.G = 0;
-				Vertices[Faces[i].V[j]].ColorData.B = 0;
+				R[k] = j;
+				if (k == 1)
+					break;
+				k++;
 			}
 		}
-		else if (Faces[i].Pb > 0.5 + EPSILON)
+
+		if (Faces[i].Pl[R[0]] - Faces[i].Pl[R[1]] > EPSILON)//如果最大的概率比第二大的大一个阈值，就认为落在第一大的聚类中心内部，反之同理
 		{
-			Faces[i].Kind = B;
-			for (unsigned int j = 0; j < 3; j++)
-			{
-				Vertices[Faces[i].V[j]].ColorData.R = 0;
-				Vertices[Faces[i].V[j]].ColorData.G = 255;
-				Vertices[Faces[i].V[j]].ColorData.B = 0;
-			}
+			Faces[i].Kind = DETERMINED;
+			Faces[i].PossibleRep.first = Reps[R[0]];
+			Faces[i].PossibleRep.second = Reps[R[1]];
 		}
-		else if (Faces[i].Pb <= 0.5 + EPSILON && Faces[i].Pb >= 0.5 - EPSILON)
+		else if (Faces[i].Pl[R[1]] - Faces[i].Pl[R[0]] > EPSILON)
+		{
+			Faces[i].Kind = DETERMINED;
+			Faces[i].PossibleRep.first = Reps[R[1]];
+			Faces[i].PossibleRep.second = Reps[R[0]];
+		}
+		else
 		{
 			Faces[i].Kind = FUZZY;
-			for (unsigned int j = 0; j < 3; j++)
-			{
-				Vertices[Faces[i].V[j]].ColorData.R = 0;
-				Vertices[Faces[i].V[j]].ColorData.G = 0;
-				Vertices[Faces[i].V[j]].ColorData.B = 255;
-			}
-			FuzzyFacesIdx.push_back(i);
+			Faces[i].PossibleRep.first = Reps[R[0]];
+			Faces[i].PossibleRep.second = Reps[R[1]];
+			
+			FuzzyIdx[Faces[i].PossibleRep].push_back(i);
 		}
 	}
-	unsigned int FuzzyFacesCnt = FuzzyFacesIdx.size();
-	for (unsigned int i = 0; i < FuzzyFacesCnt; i++)
+
+	map<pair<int, int>, vector<int> >::iterator It;
+	for (It = FuzzyIdx.begin(); It != FuzzyIdx.end(); It++)
 	{
-		for (unsigned int j = 0; j < Faces[FuzzyFacesIdx[i]].Neighbors.size(); j++)
+		unsigned int FuzzyCnt = (*It).second.size();
+		for (unsigned int i = 0; i < FuzzyCnt; i++)
 		{
-			if (Faces[Faces[FuzzyFacesIdx[i]].Neighbors[j].Face].Kind != FUZZY)
+			for (unsigned int j = 0; j < Faces[(*It).second[i]].Neighbors.size(); j++)
 			{
-				Faces[Faces[FuzzyFacesIdx[i]].Neighbors[j].Face].Kind = FUZZY;
-				FuzzyFacesIdx.push_back(Faces[FuzzyFacesIdx[i]].Neighbors[j].Face);//将边界上与模糊区域相交的面片也变成边界面
+				if (Faces[Faces[(*It).second[i]].Neighbors[j].Face].Kind != FUZZY)
+				{
+					if (Faces[Faces[(*It).second[i]].Neighbors[j].Face].PossibleRep == Faces[(*It).second[i]].PossibleRep
+						|| (Faces[Faces[(*It).second[i]].Neighbors[j].Face].PossibleRep.first == Faces[(*It).second[i]].PossibleRep.second 
+							&& Faces[Faces[(*It).second[i]].Neighbors[j].Face].PossibleRep.second == Faces[(*It).second[i]].PossibleRep.first))
+					{
+						Faces[Faces[(*It).second[i]].Neighbors[j].Face].Kind = FUZZY;
+						(*It).second.push_back(Faces[(*It).second[i]].Neighbors[j].Face);//将边界上与模糊区域相交的面片也变成边界面
+					}
+				}
 			}
+		}
+	}
+
+	/*double** ppCaps;
+	for (unsigned int i = 0; i < FacesCnt; i++)
+	{
+		ppCaps[i] = new double[FacesCnt];
+	}*/
+
+	for (It = FuzzyIdx.begin(); It != FuzzyIdx.end(); It++)
+	{
+		accurateDiv(Vertices, Faces, (*It).second, AverageAngleDist, ppEdges, (*It).first.first, (*It).first.second);
+	}
+
+	//for (unsigned int i = 0; i < FacesCnt; i++)//清除边的矩阵
+	//{
+	//	delete[] ppCaps[i];
+	//}
+	//delete ppCaps;
+
+	//上色
+	map<int, int> NewColor;
+	int ColorDiff = 255 / (Reps.size() - 1);
+	for (unsigned int i = 0; i < Reps.size(); i++)
+	{
+		NewColor[Reps[i]] = i * ColorDiff;
+	}
+	for (unsigned int i = 0; i < FacesCnt; i++)
+	{
+		for (unsigned int j = 0; j < 3; j++)
+		{
+			Vertices[Faces[i].V[j]].ColorData.R = NewColor[Faces[i].PossibleRep.first] % 256;
+			Vertices[Faces[i].V[j]].ColorData.G = (NewColor[Faces[i].PossibleRep.first] * 97) % 256;
+			Vertices[Faces[i].V[j]].ColorData.B = (NewColor[Faces[i].PossibleRep.first] * 7) % 256;
 		}
 	}
 }
@@ -634,6 +812,7 @@ void fuzzyDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Fuzzy
 void accurateDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& FuzzyFacesIdx, double AverageAngleDist, double**& ppEdges, int Repa, int Repb)
 {
 	vector<int> ANeighbors;
+	pair<int, int> CurReps(Repa, Repb);
 	//计算每条边的流量
 	unsigned int FuzzyFacesCnt = FuzzyFacesIdx.size();
 	for (unsigned int i = 0; i < FuzzyFacesCnt; i++)
@@ -642,13 +821,13 @@ void accurateDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Fu
 		{
 			if (Faces[Faces[FuzzyFacesIdx[i]].Neighbors[j].Face].Kind != FUZZY)//如果边上是A或B区域的面片，则流量为无穷
 			{
-				if (Faces[Faces[FuzzyFacesIdx[i]].Neighbors[j].Face].Kind == A)//如果边上是A区域面片，就把面片放入A区域的邻域中
+				if (Faces[Faces[FuzzyFacesIdx[i]].Neighbors[j].Face].PossibleRep.first == Repa)//如果边上是A区域面片，就把面片放入A区域的邻域中
 				{
 					ppEdges[FuzzyFacesIdx[i]][Repa] = INF;
 					ppEdges[Repa][FuzzyFacesIdx[i]] = INF;
 					ANeighbors.push_back(FuzzyFacesIdx[i]);
 				}
-				else if (Faces[Faces[FuzzyFacesIdx[i]].Neighbors[j].Face].Kind == B)//如果边上是B区域面片
+				else if (Faces[Faces[FuzzyFacesIdx[i]].Neighbors[j].Face].PossibleRep.second == Repb)//如果边上是B区域面片
 				{
 					ppEdges[FuzzyFacesIdx[i]][Repb] = INF;
 					ppEdges[Repb][FuzzyFacesIdx[i]] = INF;
@@ -692,7 +871,7 @@ void accurateDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Fu
 					continue;
 				if (ppEdges[CurFace][Faces[CurFace].Neighbors[j].Face] <= 1E-6)//如果到下一个面片的流量为0，下一个面片不入队
 					continue;
-				if (Faces[Faces[CurFace].Neighbors[j].Face].Kind == B)//如果下一个面片是在B区域内，找到通路
+				if (Faces[Faces[CurFace].Neighbors[j].Face].Kind == DETERMINED && Faces[Faces[CurFace].Neighbors[j].Face].PossibleRep.first == Repb)//如果下一个面片是在B区域内，找到通路
 				{
 					if (Faces[CurFace].CurMaxCap > CapMax)
 					{
@@ -701,7 +880,10 @@ void accurateDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Fu
 						EndFace = CurFace;//当前面片为最后结束的面片
 					}
 				}
-				if (Faces[Faces[CurFace].Neighbors[j].Face].Kind == FUZZY)//如果没有到达B区域，就入队，并记录父节点位置
+				if (Faces[Faces[CurFace].Neighbors[j].Face].Kind == FUZZY && 
+					(Faces[Faces[CurFace].Neighbors[j].Face].PossibleRep == CurReps || 
+						(Faces[Faces[CurFace].Neighbors[j].Face].PossibleRep.first == CurReps.second && 
+						Faces[Faces[CurFace].Neighbors[j].Face].PossibleRep.second == CurReps.first)))//如果没有到达B区域，就入队，并记录父节点位置
 				{
 					Faces[Faces[CurFace].Neighbors[j].Face].Parent = CurFace;
 					Faces[Faces[CurFace].Neighbors[j].Face].State = DISCOVERED;
@@ -730,18 +912,14 @@ void accurateDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Fu
 	} while (PathExist);
 	
 	clearState(Faces);
-	//精细分割上色
+	//精细分割
 	for (unsigned int i = 0; i < ANeighbors.size(); i++)
 	{
 		NeighborQ.push(ANeighbors[i]);//从A区域开始进行广度优先遍历
-		Faces[ANeighbors[i]].Kind = A;
+		Faces[ANeighbors[i]].Kind = DETERMINED;
 		Faces[ANeighbors[i]].State = DISCOVERED;
-		for (unsigned int j = 0; j < 3; j++)
-		{
-			Vertices[Faces[ANeighbors[i]].V[j]].ColorData.R = 255;
-			Vertices[Faces[ANeighbors[i]].V[j]].ColorData.G = 0;
-			Vertices[Faces[ANeighbors[i]].V[j]].ColorData.B = 0;
-		}
+		Faces[ANeighbors[i]].PossibleRep.first = Repa;
+		Faces[ANeighbors[i]].PossibleRep.second = Repb;
 	}
 	while (!NeighborQ.empty())
 	{
@@ -755,17 +933,16 @@ void accurateDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Fu
 				continue;
 			if (Faces[Faces[CurFace].Neighbors[j].Face].CurMaxCap <= 1E-6)//如果到下一个面片的流量为0，下一个面片不入队
 				continue;
-			if (Faces[Faces[CurFace].Neighbors[j].Face].Kind == FUZZY)//如果没有到达分解区域，就入队，并更改颜色
+			if (Faces[Faces[CurFace].Neighbors[j].Face].Kind == FUZZY &&
+				(Faces[Faces[CurFace].Neighbors[j].Face].PossibleRep == CurReps ||
+					(Faces[Faces[CurFace].Neighbors[j].Face].PossibleRep.first == CurReps.second &&
+					Faces[Faces[CurFace].Neighbors[j].Face].PossibleRep.second == CurReps.first)))//如果没有到达分解区域，就入队
 			{
-				Faces[Faces[CurFace].Neighbors[j].Face].Kind = A;
+				Faces[Faces[CurFace].Neighbors[j].Face].Kind = DETERMINED;
 				Faces[Faces[CurFace].Neighbors[j].Face].State = DISCOVERED;
+				Faces[Faces[CurFace].Neighbors[j].Face].PossibleRep.first = Repa;
+				Faces[Faces[CurFace].Neighbors[j].Face].PossibleRep.second = Repb;
 				NeighborQ.push(Faces[CurFace].Neighbors[j].Face);
-				for (unsigned int j = 0; j < 3; j++)
-				{
-					Vertices[Faces[Faces[CurFace].Neighbors[j].Face].V[j]].ColorData.R = 255;
-					Vertices[Faces[Faces[CurFace].Neighbors[j].Face].V[j]].ColorData.G = 0;
-					Vertices[Faces[Faces[CurFace].Neighbors[j].Face].V[j]].ColorData.B = 0;
-				}
 			}
 		}
 	}
@@ -773,13 +950,9 @@ void accurateDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Fu
 	{
 		if (Faces[FuzzyFacesIdx[i]].Kind == FUZZY)
 		{
-			Faces[FuzzyFacesIdx[i]].Kind = B;
-			for (unsigned int j = 0; j < 3; j++)
-			{
-				Vertices[Faces[FuzzyFacesIdx[i]].V[j]].ColorData.R = 0;
-				Vertices[Faces[FuzzyFacesIdx[i]].V[j]].ColorData.G = 255;
-				Vertices[Faces[FuzzyFacesIdx[i]].V[j]].ColorData.B = 0;
-			}
+			Faces[FuzzyFacesIdx[i]].Kind = DETERMINED;
+			Faces[FuzzyFacesIdx[i]].PossibleRep.first = Repb;
+			Faces[FuzzyFacesIdx[i]].PossibleRep.second = Repa;
 		}
 	}
 }
