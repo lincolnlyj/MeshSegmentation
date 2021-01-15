@@ -1,6 +1,6 @@
 #include "Functions.h"
 
-void SplitString(const std::string& s, std::vector<std::string>& v, const std::string& c)
+void splitString(const std::string& s, std::vector<std::string>& v, const std::string& c)
 {
 	std::string::size_type pos1, pos2;
 	pos2 = s.find(c);
@@ -34,7 +34,7 @@ bool readObjFile(string& FileName, vector<Vertice>& Vertices, vector<Face>& Face
 	while (getline(ObjFile, Temp))
 	{
 		VecTemp.clear();
-		SplitString(Temp, VecTemp, " ");
+		splitString(Temp, VecTemp, " ");
 		if (!VecTemp.empty())
 		{
 
@@ -56,6 +56,7 @@ bool readObjFile(string& FileName, vector<Vertice>& Vertices, vector<Face>& Face
 					TempV.ColorData.R = stoi(VecTemp[4]);
 					TempV.ColorData.G = stoi(VecTemp[5]);
 					TempV.ColorData.B = stoi(VecTemp[6]);
+					Vertices.push_back(TempV);
 				}
 				else
 				{
@@ -607,17 +608,17 @@ void accurateDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Fu
 		NeighborQ.push(ANeighbors[i]);//从A区域开始进行广度优先遍历
 		Faces[ANeighbors[i]].Kind = A;
 		Faces[ANeighbors[i]].State = DISCOVERED;
-		for (unsigned int j = 0; j < 3; j++)
-		{
-			Vertices[Faces[ANeighbors[i]].V[j]].ColorData.R = 255;
-			Vertices[Faces[ANeighbors[i]].V[j]].ColorData.G = 0;
-			Vertices[Faces[ANeighbors[i]].V[j]].ColorData.B = 0;
-		}
 	}
 	while (!NeighborQ.empty())
 	{
 		int CurFace = NeighborQ.front();
 		NeighborQ.pop();
+		for (unsigned int j = 0; j < 3; j++)
+		{
+			Vertices[Faces[CurFace].V[j]].ColorData.R = 255;
+			Vertices[Faces[CurFace].V[j]].ColorData.G = 0;
+			Vertices[Faces[CurFace].V[j]].ColorData.B = 0;
+		}
 		for (unsigned int j = 0; j < Faces[CurFace].Neighbors.size(); j++)
 		{
 			if (Faces[Faces[CurFace].Neighbors[j].Face].State == DISCOVERED)
@@ -631,12 +632,6 @@ void accurateDiv(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Fu
 				Faces[Faces[CurFace].Neighbors[j].Face].Kind = A;
 				Faces[Faces[CurFace].Neighbors[j].Face].State = DISCOVERED;
 				NeighborQ.push(Faces[CurFace].Neighbors[j].Face);
-				for (unsigned int j = 0; j < 3; j++)
-				{
-					Vertices[Faces[CurFace].V[j]].ColorData.R = 255;
-					Vertices[Faces[CurFace].V[j]].ColorData.G = 0;
-					Vertices[Faces[CurFace].V[j]].ColorData.B = 0;
-				}
 			}
 		}
 	}

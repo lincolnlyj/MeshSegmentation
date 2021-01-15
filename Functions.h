@@ -14,7 +14,7 @@
 using namespace std;
 
 //分割字符串的函数
-void SplitString(const std::string& s, std::vector<std::string>& v, const std::string& c);
+void splitString(const std::string& s, std::vector<std::string>& v, const std::string& c);
 //读取obj文件
 bool readObjFile(string& FileName, vector<Vertice>& Vertices, vector<Face>& Faces);
 //输出obj文件
