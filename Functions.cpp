@@ -598,13 +598,17 @@ void Div(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Reps, doub
 			}
 		}
 
-		if (Faces[i].Pl[R[0]] - Faces[i].Pl[R[1]] > EPSILON)//如果最大的概率比第二大的大一个阈值，就认为落在第一大的聚类中心内部，反之同理
+		double NormFactor = Faces[i].Pl[R[0]] + Faces[i].Pl[R[1]];
+		Faces[i].Pl[R[0]] /= NormFactor;//归一化
+		Faces[i].Pl[R[1]] /= NormFactor;
+
+		if (Faces[i].Pl[R[0]] > 0.5 + EPSILON)//如果最大的概率比第二大的大一个阈值，就认为落在第一大的聚类中心内部，反之同理
 		{
 			Faces[i].Kind = DETERMINED;
 			Faces[i].PossibleRep.first = Reps[R[0]];
 			Faces[i].PossibleRep.second = Reps[R[1]];
 		}
-		else if (Faces[i].Pl[R[1]] - Faces[i].Pl[R[0]] > EPSILON)
+		else if (Faces[i].Pl[R[1]] > 0.5 + EPSILON)
 		{
 			Faces[i].Kind = DETERMINED;
 			Faces[i].PossibleRep.first = Reps[R[1]];

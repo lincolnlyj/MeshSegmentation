@@ -7,10 +7,10 @@ using namespace std;
 
 typedef double Coordinate[3];
 
-const double DELTA = 0.5;//初始化种子的加权参数
+const double DELTA = 0.3;//初始化种子的加权参数
 const double CONVEXETA = 0.1;//凹面的Eta值
 const double INF = 999999;//无穷
-const double EPSILON = 0.036;//模糊分割的阈值
+const double EPSILON = 0.1;//模糊分割的阈值
 
 enum FaceState
 {
