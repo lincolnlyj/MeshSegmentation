@@ -647,9 +647,9 @@ void Div(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Reps, doub
 	unordered_map<int, Color> NewColor;
 	int ColorDiff;
 	if ((Reps.size() + FuzzyIdx.size()) % 6 == 0)
-		ColorDiff = 255 / ((Reps.size() + FuzzyIdx.size()) / 6);
+		ColorDiff = 255 / (maxNum(Reps.size(), FuzzyIdx.size()) / 6);
 	else
-		ColorDiff = 255 / ((Reps.size() + FuzzyIdx.size()) / 6 + 1);
+		ColorDiff = 255 / (maxNum(Reps.size(), FuzzyIdx.size()) / 6 + 1);
 	for (unsigned int i = 0; i < Reps.size(); i++)
 	{
 		if (i % 6 == 0)
@@ -679,7 +679,7 @@ void Div(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Reps, doub
 	}
 
 	//模糊区域上色以及模糊区域的重新划分
-	unsigned int FuzzyColorCnt = Reps.size();
+	unsigned int FuzzyColorCnt = 0;
 	map<pair<int, int>, vector<int> >::iterator It;
 	for (It = FuzzyIdx.begin(); It != FuzzyIdx.end(); It++)
 	{
