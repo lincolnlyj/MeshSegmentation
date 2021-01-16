@@ -3,8 +3,12 @@
 
 - There's two version: 01-means segmentation and k-means segmentation, k-means segmentation can be found on the branch "KMeans"
 
-- The input file must be an obj file, and the amount of Faces is better to be under 4k. Since the algorism isn't that perfect, if there's too many faces, the program can be very very slow.
+- The input file must be an obj file, and the amount of Faces is better to be under 4k. Since the algorism isn't that perfect, if there's too many faces, the program can be very very slow, and it can consume quite an amount of memory. (The release version can be way faster than the debug version)
 
 - Reference: *Hierarchical Mesh Decomposition using Fuzzy Clustering and Cuts*
 
-**caution:** *It's just for fun, there's plenty bugs in it, and the code style can be very ugly*
+&nbsp;
+
+**caution:** 
+- *It's just for fun, there's plenty bugs in it, and the code style can be very ugly*
+- *Please use visual studio to compile it, since the file is encoded as GB2312*

@@ -397,7 +397,7 @@ void cluster(vector<Face>& Faces, int & Repa, int & Repb, double**& ppEdges)
 	unsigned int FacesCnt = Faces.size();
 	int LastRepa = Repa;//上一次的聚类种子
 	int LastRepb = Repb;
-	cout << "聚类种子: " << Repa << ';' << Repb << endl;
+	cout << "初始聚类种子: " << Repa << ' ' << Repb << endl;
 
 	pair<int, double> SmallestRepa(Repa, 0);//新的聚类种子
 	pair<int, double> SmallestRepb(Repb, 0);
@@ -412,6 +412,7 @@ void cluster(vector<Face>& Faces, int & Repa, int & Repb, double**& ppEdges)
 		SmallestRepa.second += Faces[j].Pa * ppEdges[Repa][j];
 		SmallestRepb.second += Faces[j].Pb * ppEdges[Repb][j];
 	}
+	cout << "初始加权距离: " << SmallestRepa.second << ' ' << SmallestRepb.second << endl;
 
 	int Cnt = 0;
 	do
@@ -453,7 +454,9 @@ void cluster(vector<Face>& Faces, int & Repa, int & Repb, double**& ppEdges)
 		if (Repa == LastRepa && Repb == LastRepb)//如果聚类种子没变就直接跳出循环
 			break;
 
-		cout << "聚类种子: " << Repa << ';' << Repb << endl;
+		cout << "第" << Cnt << "迭代: " << endl;
+		cout << "聚类种子: " << Repa << ' ' << Repb << endl;
+		cout << "加权距离: " << SmallestRepa.second << ' ' << SmallestRepb.second << endl;
 		for (unsigned int i = 0; i < FacesCnt; i++)
 		{
 			Faces[i].Pa = ppEdges[i][Repb] / (ppEdges[i][Repa] + ppEdges[i][Repb]);
