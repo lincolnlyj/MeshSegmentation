@@ -5,4 +5,6 @@
 
 - The input file must be an obj file, and the amount of Faces is better to be under 4k. Since the algorism isn't that perfect, if there's too many faces, the program can be very very slow.
 
+- Reference: *Hierarchical Mesh Decomposition using Fuzzy Clustering and Cuts*
+
 **caution:** *It's just for fun, there's plenty bugs in it, and the code style can be very ugly*
