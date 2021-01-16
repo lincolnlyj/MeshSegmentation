@@ -46,5 +46,14 @@ inline double absd(double a)
 	else
 		return -a;
 }
+//求最大值
+template <typename T>
+inline T maxNum(T a, T b)
+{
+	if (a > b)
+		return a;
+	else
+		return b;
+}
 
 #endif
