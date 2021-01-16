@@ -25,7 +25,7 @@ void outputObjFile(string NewFileName, const vector<Vertice>& Vertices, const ve
 //计算测地距离和角距离
 pair<double, double> calculateDist(vector<Vertice>& Vertices, vector<Face>& Faces);
 //计算任意两个面片间的距离
-int dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges);
+void dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges);
 //清除所有标记
 void clearState(vector<Face>& Faces);
 //得到所有需要的聚类中心

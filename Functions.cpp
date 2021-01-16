@@ -330,11 +330,9 @@ pair<double, double> calculateDist(vector<Vertice>& Vertices, vector<Face>& Face
 	return pair<double, double>(AverageGeod, AverageAngleDist);
 }
 
-int dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges)
+void dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges)
 {
 	unsigned int FacesCnt = Faces.size();
-	Edge LargestEdge;//最长的边
-	LargestEdge.Distance = 0;
 	priority_queue<Edge> EdgeQ;
 	for (unsigned int i = 0; i < FacesCnt; i++)
 	{
@@ -352,8 +350,6 @@ int dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges)
 				continue;
 			Faces[E.End].State = VISITIED;
 			ppEdges[E.Start][E.End] = E.Distance;
-			if (E.Distance > LargestEdge.Distance)
-				LargestEdge = E;
 			int EdgeCnt = Faces[E.End].Neighbors.size();
 			for (int j = 0; j < EdgeCnt; j++)
 			{
@@ -377,7 +373,6 @@ int dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges)
 		}
 		clearState(Faces);
 	}
-	return LargestEdge.Start;
 }
 
 void clearState(vector<Face>& Faces)
@@ -486,10 +481,10 @@ void cluster(vector<Face>& Faces, vector<int>& Reps, double**& ppEdges)
 	unsigned int FacesCnt = Faces.size();
 	vector<int> LastReps = Reps;
 	vector<pair<int, double> > SmallestReps;//新聚类种子
-	cout << "聚类种子: ";
+	cout << "初始聚类种子: ";
 	for (unsigned int i = 0; i < Reps.size(); i++)
 	{
-		cout << Reps[i] << ' ';
+		cout << Reps[i] + 1 << ' ';
 		pair<int, double> Temp(Reps[i], 0);
 		SmallestReps.push_back(Temp);
 	}
@@ -524,6 +519,12 @@ void cluster(vector<Face>& Faces, vector<int>& Reps, double**& ppEdges)
 			SmallestReps[k].second += Faces[j].Pl[k] * ppEdges[Reps[k]][j];
 		}
 	}
+	cout << "初始加权距离和: ";
+	for (unsigned int k = 0; k < Reps.size(); k++)
+	{
+		cout << SmallestReps[k].second << ' ';
+	}
+	cout << endl;
 
 	int Cnt = 0;
 	do
@@ -555,10 +556,17 @@ void cluster(vector<Face>& Faces, vector<int>& Reps, double**& ppEdges)
 		if (Reps == LastReps)//如果聚类种子没变就直接跳出循环
 			break;
 
-		cout << "聚类种子: ";
+		cout << "第" << Cnt << "次迭代:" << endl <<
+			"聚类种子: ";
 		for (unsigned int i = 0; i < Reps.size(); i++)
 		{
 			cout << Reps[i] << ' ';
+		}
+		cout << endl;
+		cout << "加权距离和: ";
+		for (unsigned int k = 0; k < Reps.size(); k++)
+		{
+			cout << SmallestReps[k].second << ' ';
 		}
 		cout << endl;
 		for (unsigned int i = 0; i < FacesCnt; i++)
@@ -638,23 +646,35 @@ void Div(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Reps, doub
 	//上色
 	unordered_map<int, Color> NewColor;
 	int ColorDiff;
-	if ((Reps.size() + FuzzyIdx.size()) % 3 == 0)
-		ColorDiff = 255 / ((Reps.size() + FuzzyIdx.size()) / 3);
+	if ((Reps.size() + FuzzyIdx.size()) % 6 == 0)
+		ColorDiff = 255 / ((Reps.size() + FuzzyIdx.size()) / 6);
 	else
-		ColorDiff = 255 / ((Reps.size() + FuzzyIdx.size()) / 3 + 1);
+		ColorDiff = 255 / ((Reps.size() + FuzzyIdx.size()) / 6 + 1);
 	for (unsigned int i = 0; i < Reps.size(); i++)
 	{
-		if (i % 3 == 0)
+		if (i % 6 == 0)
 		{
-			NewColor[Reps[i]] = Color((i / 3 + 1) * ColorDiff, 0, 0);
+			NewColor[Reps[i]] = Color((i / 6 + 1) * ColorDiff, 0, 0);
 		}
-		else if (i % 3 == 1)
+		else if (i % 6 == 1)
 		{
-			NewColor[Reps[i]] = Color(0, (i / 3 + 1) * ColorDiff, 0);
+			NewColor[Reps[i]] = Color(0, (i / 6 + 1) * ColorDiff, 0);
+		}
+		else if(i % 6 == 2)
+		{
+			NewColor[Reps[i]] = Color(0, 0, (i / 6 + 1) * ColorDiff);
+		}
+		else if (i % 6 == 3)
+		{
+			NewColor[Reps[i]] = Color((i / 6 + 1) * ColorDiff, (i / 6 + 1) * ColorDiff, 0);
+		}
+		else if (i % 6 == 4)
+		{
+			NewColor[Reps[i]] = Color((i / 6 + 1) * ColorDiff, 0, (i / 6 + 1) * ColorDiff);
 		}
 		else
 		{
-			NewColor[Reps[i]] = Color(0, 0, (i / 3 + 1) * ColorDiff);
+			NewColor[Reps[i]] = Color(0, (i / 6 + 1) * ColorDiff, (i / 6 + 1) * ColorDiff);
 		}
 	}
 
@@ -664,16 +684,25 @@ void Div(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Reps, doub
 	for (It = FuzzyIdx.begin(); It != FuzzyIdx.end(); It++)
 	{
 		unsigned int FuzzyCnt = (*It).second.size();
+		//上色
+		Color Temp;
+		if (FuzzyColorCnt % 6 == 0)
+			Temp = Color((FuzzyColorCnt / 6 + 1) * ColorDiff, 0, 0);
+		else if (FuzzyColorCnt % 3 == 1)
+			Temp = Color(0, (FuzzyColorCnt / 6 + 1) * ColorDiff, 0);
+		else if (FuzzyColorCnt % 3 == 2)
+			Temp = Color(0, 0, (FuzzyColorCnt / 6 + 1) * ColorDiff);
+		else if (FuzzyColorCnt % 3 == 3)
+			Temp = Color((FuzzyColorCnt / 6 + 1) * ColorDiff, (FuzzyColorCnt / 6 + 1) * ColorDiff, 0);
+		else if (FuzzyColorCnt % 3 == 4)
+			Temp = Color((FuzzyColorCnt / 6 + 1) * ColorDiff, 0, (FuzzyColorCnt / 6 + 1) * ColorDiff);
+		else
+			Temp = Color(0, (FuzzyColorCnt / 6 + 1) * ColorDiff, (FuzzyColorCnt / 6 + 1) * ColorDiff);
+
+		FuzzyColorCnt++;
+
 		for (unsigned int i = 0; i < FuzzyCnt; i++)
 		{
-			//上色
-			Color Temp;
-			if (FuzzyColorCnt % 3 == 0)
-				Temp = Color((FuzzyColorCnt / 3 + 1) * ColorDiff, 0, 0);
-			else if (FuzzyColorCnt % 3 == 1)
-				Temp = Color(0, (FuzzyColorCnt / 3 + 1) * ColorDiff, 0);
-			else if (FuzzyColorCnt % 3 == 2)
-				Temp = Color(0, 0, (FuzzyColorCnt / 3 + 1) * ColorDiff);
 			for (unsigned int j = 0; j < 3; j++)
 				Vertices[Faces[(*It).second[i]].V[j]].ColorData = Temp;
 
@@ -693,7 +722,6 @@ void Div(vector<Vertice>& Vertices, vector<Face>& Faces, vector<int>& Reps, doub
 			}
 		}
 
-		FuzzyColorCnt++;
 	}
 
 	outputObjFile("Mid" + FileName, Vertices, Faces);//不输出黑色
