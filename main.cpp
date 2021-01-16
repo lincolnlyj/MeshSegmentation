@@ -30,7 +30,7 @@ int main(int argc, char* argv[])
 	ppEdges = new double*[FacesCnt];
 	for (unsigned int i = 0; i < FacesCnt; i++)
 	{
-		ppEdges[i] = new double[FacesCnt];
+		ppEdges[i] = new double[FacesCnt]();
 	}
 
 	AverageDist = calculateDist(Vertices, Faces);

@@ -364,7 +364,18 @@ Edge dijkstra(vector<Vertice>& Vertices, vector<Face>& Faces, double**& ppEdges)
 				Temp.End = Faces[E.End].Neighbors[j].Face;
 				Temp.Distance = Faces[E.End].Neighbors[j].Weight + E.Distance;
 				if (Faces[Temp.End].State != VISITIED)
-					EdgeQ.push(Temp);
+				{
+					if (!ppEdges[Temp.Start][Temp.End])//如果没有存过临时距离，就保存临时距离
+					{
+						EdgeQ.push(Temp);
+						ppEdges[Temp.Start][Temp.End] = Temp.Distance;
+					}
+					else if (Temp.Distance < ppEdges[Temp.Start][Temp.End])//如果存过临时距离，就判断新距离是否小于临时距离，如果小于再入队
+					{
+						EdgeQ.push(Temp);
+						ppEdges[Temp.Start][Temp.End] = Temp.Distance;
+					}
+				}
 			}
 		}
 		clearState(Faces);
